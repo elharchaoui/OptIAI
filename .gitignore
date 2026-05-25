@@ -20,6 +20,13 @@ wheels/
 
 # Ephemeral process files
 *.pid
+*.log
+
+# LoRA checkpoint directories
+lora_epoch*/
+
+# Screenshots
+screen-shots/
 
 # Jupyter
 .ipynb_checkpoints/
