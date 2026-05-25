@@ -8,3 +8,18 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Claude Code memory (private)
+.claude/
+
+# Model checkpoints / large binaries
+*.safetensors
+*.bin
+*.pt
+*.pth
+
+# Ephemeral process files
+*.pid
+
+# Jupyter
+.ipynb_checkpoints/
