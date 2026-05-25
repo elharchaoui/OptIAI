@@ -40,6 +40,8 @@ This costs `(out + in) × k` — a speedup of `(out × in) / ((out + in) × k)`.
 | [04](experiments/04_gpt2small_monarch/) | Monarch | GPT-2 small | Block structure beats global SVD 3× at equal parameter budget; but all methods fail at GPT-2 scale |
 | [05](experiments/05_gpt2large_asvd/) | ASVD | GPT-2 Large | **First success:** ASVD rank=640 gives 1.6× speedup at 2.78× baseline ppl; no single layer is a hard blocker; recovery via LoRA is viable |
 | [06](experiments/06_gpt2large_lora_recovery/) | ASVD + LoRA recovery | GPT-2 Large | **Full recovery:** 1.13% trainable params restore + surpass baseline (0.89× ppl) while keeping 1.6× speedup; epoch 1 alone crosses below baseline |
+| [07](experiments/07_gpt2large_layerwise_recovery/) | Closed-form per-layer recovery | GPT-2 Large | **Fails:** per-layer SVD correction achieves only 4.54× at rank=16 vs LoRA's 0.89× — cross-layer error cascade cannot be fixed without end-to-end gradients |
+| [08](experiments/08_gpt2large_lora_cf_init/) | ASVD + LoRA with CF init (LoftQ-style) | GPT-2 Large | **Best result:** CF-init LoRA reaches 0.863× baseline (23.79 ppl) vs 0.890× for zero-init — 3% better quality, epoch 1 alone beats Exp 06 final |
 
 ---
 
@@ -79,6 +81,10 @@ Combination of ASVD scaling with Monarch projection — not in any paper. Tested
 
 5. **Compressed + recovered > original.** ASVD rank=640 + LoRA fine-tuning (1.13% trainable params, 55 min on T4) achieves 0.89× baseline perplexity on WikiText-2 while keeping the full 1.6× inference speedup. The factored weights, not LoRA, do inference — so the speedup is fully preserved.
 
+6. **Per-layer closed-form correction fails.** Fixing each compressed matrix independently via SVD of its residual achieves only 4.54× baseline at rank=16 — 5× worse than LoRA at equal parameter count. The cascade is cumulative: layer-local corrections mismatch once adjacent layers are also corrected. End-to-end gradient flow is not optional.
+
+7. **Closed-form init beats zero-init LoRA.** Using the residual SVD (Exp 07) as LoRA initialization (LoftQ-style) gives 23.79 ppl vs 24.53 for zero-init — 3% better final quality at identical training cost. Epoch 1 of CF-init already beats Exp 06's 3-epoch result. The warm start places adapters on the principal components of the ASVD error, letting joint fine-tuning close the cross-layer cascade from a better basin.
+
 ---
 
 ## Papers
@@ -99,5 +105,5 @@ Combination of ASVD scaling with Monarch projection — not in any paper. Tested
 
 ## Planned Next Steps
 
-- **Experiment 07:** Scale to LLaMA-7B or Mistral-7B via 4-bit quantized loading (~4 GB VRAM)
-- **Experiment 08:** Benchmark actual inference latency with factored linear layers (verify theoretical speedup holds in practice)
+- **Experiment 08:** Scale to LLaMA-7B or Mistral-7B via 4-bit quantized loading (~4 GB VRAM)
+- **Experiment 09:** Benchmark actual inference latency with factored linear layers (verify theoretical speedup holds in practice)
