@@ -1,0 +1,7 @@
+Device: cuda
+GPU: NVIDIA GeForce RTX 3060
+VRAM: 12.5 GB
+
+Loading GPT-2 Large...
+Loading weights:   0%|          | 0/436 [00:00<?, ?it/s]Loading weights:  30%|██▉       | 130/436 [00:00<00:00, 1247.10it/s]Loading weights:  63%|██████▎   | 274/436 [00:00<00:00, 1332.07it/s]Loading weights:  94%|█████████▎| 408/436 [00:00<00:00, 1206.96it/s]Loading weights: 100%|██████████| 436/436 [00:00<00:00, 990.71it/s] 
+[transformers] `loss_type=None` was set in the config but it is unrecognized. Using the default loss: `ForCausalLMLoss`.

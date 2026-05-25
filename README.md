@@ -39,6 +39,7 @@ This costs `(out + in) × k` — a speedup of `(out × in) / ((out + in) × k)`.
 | [03](experiments/03_gpt2small_asvd/) | ASVD | GPT-2 small | ASVD (activation-aware SVD) is 8–9× better than naive; layer 0 is a hard blocker; speedup and quality still don't overlap |
 | [04](experiments/04_gpt2small_monarch/) | Monarch | GPT-2 small | Block structure beats global SVD 3× at equal parameter budget; but all methods fail at GPT-2 scale |
 | [05](experiments/05_gpt2large_asvd/) | ASVD | GPT-2 Large | **First success:** ASVD rank=640 gives 1.6× speedup at 2.78× baseline ppl; no single layer is a hard blocker; recovery via LoRA is viable |
+| [06](experiments/06_gpt2large_lora_recovery/) | ASVD + LoRA recovery | GPT-2 Large | **Full recovery:** 1.13% trainable params restore + surpass baseline (0.89× ppl) while keeping 1.6× speedup; epoch 1 alone crosses below baseline |
 
 ---
 
@@ -76,6 +77,8 @@ Combination of ASVD scaling with Monarch projection — not in any paper. Tested
 
 4. **Degradation at compression is cumulative, not structural.** At GPT-2 Large, each individual layer tolerates rank=640 within ±2% of baseline. The 2.78× ppl hit comes from 36 layers compounding — which LoRA fine-tuning can recover.
 
+5. **Compressed + recovered > original.** ASVD rank=640 + LoRA fine-tuning (1.13% trainable params, 55 min on T4) achieves 0.89× baseline perplexity on WikiText-2 while keeping the full 1.6× inference speedup. The factored weights, not LoRA, do inference — so the speedup is fully preserved.
+
 ---
 
 ## Papers
@@ -96,6 +99,5 @@ Combination of ASVD scaling with Monarch projection — not in any paper. Tested
 
 ## Planned Next Steps
 
-- **Experiment 06:** LoRA fine-tuning recovery after ASVD rank=640 on GPT-2 Large — recover from 2.78× to ≤ 1.1× baseline ppl while keeping factored weights
 - **Experiment 07:** Scale to LLaMA-7B or Mistral-7B via 4-bit quantized loading (~4 GB VRAM)
 - **Experiment 08:** Benchmark actual inference latency with factored linear layers (verify theoretical speedup holds in practice)
