@@ -9,6 +9,7 @@ Identical to Exp 06 in every way except LoRA initialization.
 | Model | GPT-2 Large (774M params, 36 layers) |
 | Compression | ASVD rank=640 on `c_fc`, `c_proj` (72 layers) |
 | LoRA rank / alpha | 16 / 32 |
+| LoRA targets | `c_fc`, `c_proj`. Suffix match also hits the uncompressed `attn.c_proj` (as in Exp 06). CF init covers only the 72 MLP pairs; the `attn.c_proj` adapters use PEFT's default init. |
 | LoRA dropout | 0.05 |
 | Dataset | WikiText-2, 3 epochs, batch=4, grad_accum=4, LR=3e-4 |
 | Hardware | Modal T4 (~55 min) |
@@ -60,7 +61,7 @@ The full compression+recovery pipeline now runs in two stages:
    LoRA fine-tune ep 3    (~18min) →   23.79 ppl  (0.863×)  ← final
 ```
 
-**Inference speedup retained: 1.6×** (ASVD factored weights do inference; LoRA discarded after training).
+**Theoretical MLP speedup: about 1.56×.** The LoRA adapters must stay at inference, because they hold the recovery. Keep them as a rank-16 side branch, or fold them into the ASVD factors (rank 640 → 656). Both give about 1.56× instead of 1.60×.
 
 ## Comparison with All Experiments
 

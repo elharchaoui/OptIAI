@@ -64,7 +64,7 @@ LoRA fine-tuning, in contrast, propagates gradients through the full network. Ea
 
 ## Speedup Consideration
 
-Closed-form correction (when merged into weights) produces a dense matrix — it destroys the 1.6× inference speedup. LoRA fine-tuning also loses the speedup if adapters are merged, but in LoRA the factored (compressed) weights do inference and the adapters are discarded after training.
+Merging any rank-16 correction (closed-form or LoRA) into a dense weight matrix destroys the 1.6× speedup. Neither needs to be merged that way. The correction can stay as a side branch, or be folded into the factors (rank 640 → 656). Both cost about 2.5% extra per MLP matmul (1.60× → about 1.56×). LoRA adapters cannot be discarded after training: they hold the recovery.
 
 If the closed-form correction were kept in factored form (W_approx + A·B at inference), we would trade some speedup for quality:
 - W_approx: rank=640 factored (gives 1.6× speedup)

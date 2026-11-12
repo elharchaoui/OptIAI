@@ -28,7 +28,7 @@ then the cost drops to `(out + in) × k`, yielding a speedup of:
 speedup = (out × in) / ((out + in) × k)
 ```
 
-**The break-even condition — where speedup > 1 — requires `k < (out × in) / (out + in) ≈ min(out, in) / 2`.** That is, the approximation rank must be less than half the smaller dimension.
+**The break-even condition — where speedup > 1 — requires `k < (out × in) / (out + in)`.** For a square n×n matrix that is n/2. For GPT-2's 4:1 MLP matrices it is 0.8 × min(out, in): rank 614 for GPT-2 small, rank 1024 for GPT-2 Large. The experiments below target a 1.6× MLP speedup instead. For 4:1 matrices this is rank = min(out, in) / 2 (384 for small, 640 for Large), called "the 1.6× rank" below.
 
 ### Why This Matters
 
@@ -108,9 +108,9 @@ This direction was motivated by the failure of Experiment 07 (closed-form correc
 
 The binary gate finding was immediate and clean: a threshold at the p50 of activations is mathematically equivalent to ReLU (same active set → rel_err ≈ 0.0001). Direction B was confirmed valid — but the speedup was zero. The activation is not the computational bottleneck; the matmul is. Direction B was eliminated.
 
-Low-rank SVD at 128×128 was unsurprising: rank=32 (50% of full rank) gave only 1.2× speedup with 25% relative error. At this matrix size, the break-even rank equals the full rank — no speedup is achievable without quality loss.
+Low-rank SVD at 128×128 was unsurprising: rank=32 (25% of full rank, 2× theoretical speedup) gave 57% relative error, and even rank=64 (break-even) gave 31%. Random Gaussian matrices have a flat singular spectrum, so there is no low-rank structure to exploit. (The script times the dense rank-k product, so its wall-clock "speedup" is noise, not a low-rank effect.)
 
-The error accumulation finding was the most important result: a per-layer error of 0.25 (at rank=32) grows to 0.90 after 12 layers. Any viable compression scheme must keep per-layer error below 0.05. This set a hard constraint that all subsequent experiments would need to satisfy.
+The error accumulation finding was the most important result: a per-layer error of 0.30 (at rank=64) grows to 0.76 after 12 layers, and 0.56 (at rank=32) grows to 0.98. Any viable compression scheme must keep per-layer error very small (rule of thumb: below 0.05). This set a hard constraint that all subsequent experiments would need to satisfy.
 
 **What it changed:** Abandoned Direction B entirely. Confirmed that scale (larger matrices) would be necessary for any speedup to appear. Set the error accumulation constraint.
 
@@ -157,13 +157,13 @@ The improvement was dramatic and confirmed the hypothesis:
 
 ASVD at rank=512 gave ppl=34 (1.33× baseline) — near-usable quality. Naive SVD at the same rank was completely unusable (ppl=293). Direction C delivered.
 
-But the speedup math was brutal: rank=512 on GPT-2 small (768-dim matrices) gives only 1.2× theoretical speedup. Not worth the approximation cost. The break-even rank (< 384) is exactly where even ASVD fails.
+But the speedup math was brutal: rank=512 on GPT-2 small (768-dim matrices) gives only 1.2× theoretical speedup. Not worth the approximation cost. The 1.6× rank (384) is exactly where even ASVD fails.
 
 The per-layer sensitivity analysis revealed a second problem: **Layer 0 is catastrophically sensitive**. Compressing only layer 0 to rank=128 raised ppl from 28 to 136 (5×). Every other layer was tolerant. This created a hard blocker: to protect layer 0, non-uniform rank allocation was needed, which complicated the speedup math considerably.
 
 **Alpha sensitivity:** α=0.5 (paper's recommendation) was best or near-best. Confirmed the ASVD paper's finding.
 
-**What it changed:** Established ASVD as the required baseline for all future experiments. Identified two problems that needed solving simultaneously: (1) break-even speedup requires rank < 384, and (2) Layer 0 blocks even with ASVD. Motivated two parallel directions: Monarch (structured alternatives) and scaling up to GPT-2 Large.
+**What it changed:** Established ASVD as the required baseline for all future experiments. Identified two problems that needed solving simultaneously: (1) a 1.6× speedup requires rank ≤ 384, and (2) Layer 0 blocks even with ASVD. Motivated two parallel directions: Monarch (structured alternatives) and scaling up to GPT-2 Large.
 
 ---
 
@@ -191,13 +191,13 @@ A second insight from the weight error analysis: Monarch had *higher* Frobenius 
 
 But the fundamental problem remained: even with the 3× advantage, Monarch at n_blocks=8 (the best config) still gave 85× baseline ppl. The bottleneck was GPT-2 small's size (768-dim), not the approximation method.
 
-**What it changed:** Confirmed that Monarch structure is superior to SVD structure, but scale is the gating factor. Both Directions A and D hit the same wall at GPT-2 small scale. The only remaining path was scaling up to GPT-2 Large where 1280-dim matrices have a genuinely reachable break-even rank.
+**What it changed:** Confirmed that Monarch structure is superior to SVD structure, but scale is the gating factor. Both Directions A and D hit the same wall at GPT-2 small scale. The only remaining path was scaling up to GPT-2 Large where 1280-dim matrices make the 1.6× rank genuinely reachable.
 
 ---
 
 ### Experiment 05 — GPT-2 Large: ASVD at Scale
 
-**Why this next:** The break-even rank for speedup is `< in_dim / 2`. At GPT-2 small (768-dim), this is 384 — exactly where quality collapses. At GPT-2 Large (1280-dim), this is 640. Larger matrices have more redundancy and more room between the break-even rank and the quality cliff.
+**Why this next:** The 1.6× rank is `min(out, in) / 2` for the 4:1 MLP matrices. At GPT-2 small (768-dim), this is 384 — exactly where quality collapses. At GPT-2 Large (1280-dim), this is 640. Larger matrices have more redundancy and more room between the 1.6× rank and the quality cliff.
 
 **Setup:** GPT-2 Large (774M params, 36 layers, 1280-dim). ASVD applied to all 36 MLP layers' c_fc matrices (5120×1280). Two sub-experiments: (1) rank sweep across all layers, (2) per-layer sensitivity at rank=640 (apply ASVD to one layer at a time, keep all others dense).
 
@@ -238,13 +238,15 @@ This is the opposite of GPT-2 small, where Layer 0 was catastrophically sensitiv
 **Why this next:** Experiment 05 proved the structure is recoverable. Each layer tolerates rank=640 within ±2%. The 2.78× degradation across 36 layers is cumulative small errors, not structural damage. LoRA (Low-Rank Adaptation) adds trainable rank-r adapters on top of frozen weights. If we add LoRA on top of compressed weights and fine-tune, we're asking: can rank-16 adapters per layer recover the error introduced by rank-640 compression?
 
 **Setup:**
-- ASVD rank=640 applied to all MLP c_fc, c_proj, and attention c_proj layers (36 layers × 3 matmuls)
+- ASVD rank=640 applied to all MLP `c_fc` and `c_proj` layers (36 layers × 2 matmuls = 72 matrices); attention stays dense
 - LoRA rank=16 adapters added on top of frozen compressed weights
+- LoRA targets `c_fc`, `c_proj`: PEFT matches by name suffix, so the uncompressed `attn.c_proj` also gets adapters (1,474,560 of the 8,847,360 trainable params)
 - Trainable parameters: 8,847,360 / 782,877,440 = **1.13% of total**
 - Dataset: WikiText-2 (9,343 train chunks × 256 tokens = 2.4M tokens)
 - Optimizer: AdamW, LR=3e-4, batch=4, grad_accum=4 (effective batch 16)
 - Mixed precision: fp16 via `torch.autocast`
 - 3 epochs of training
+- Evaluation: full WikiText-2 test split in 256-token chunks. Exp 05 used one fixed passage (baseline 16.48), so ×baseline ratios do not compare across the two.
 
 **Why WikiText-2:** Standard LM benchmark. 2.4M training tokens is small enough to run quickly but large enough to get stable perplexity estimates. Test set has 283K tokens — reliable signal.
 
@@ -271,7 +273,7 @@ PEFT's LoRA handles this automatically (it detects Conv1D and sets `fan_in_fan_o
 | + LoRA epoch 2 | 24.70 | **0.90×** | 37 min |
 | + LoRA epoch 3 | 24.53 | **0.89×** | 55 min |
 
-**The compressed + LoRA-recovered model surpasses the uncompressed baseline by 11%, while keeping the full 1.6× inference speedup.**
+**The compressed + LoRA-recovered model surpasses the uncompressed baseline by 11%, at a theoretical MLP speedup of about 1.56× (adapters kept).**
 
 The recovery curve is the most striking result. ASVD compression degraded wiki PPL from 27.56 to 153.82 — a 5.58× blow. After just 18 minutes of LoRA fine-tuning (epoch 1, 584 optimizer steps), the perplexity dropped to 25.57, already **below the uncompressed baseline**. Epochs 2 and 3 added diminishing improvement. Roughly 75% of the total recovery happened in the first epoch.
 
@@ -289,7 +291,7 @@ The recovery curve is the most striking result. ASVD compression degraded wiki P
 **Why the recovery is so fast:** Each LoRA adapter has rank=16, applied to each compressed layer. The compressed weight W_compressed = A·B (rank-640 factored) needs a small correction ΔW = α · lora_B · lora_A (rank-16). Because each individual layer's error is small (±2% from the per-layer experiment), each correction needed is small. The 1.13% trainable parameters are well-matched to the 1.13% of information lost per layer.
 
 **The ppl_fixed metric divergence:**
-A secondary metric tracked perplexity on a fixed short passage (512 tokens). This metric *did not recover* — it stayed around 54× baseline throughout training. This is expected and not a quality regression:
+A secondary metric tracked perplexity on a fixed short passage (512 tokens). This metric *did not recover* — it stayed around 54 ppl (about 2.5× the 21.68 baseline) throughout training. This is expected and not a quality regression:
 
 1. After fine-tuning on WikiText-2, the model shifts distribution toward that dataset's style
 2. The fixed passage is only 512 tokens — high variance, noisy estimate
@@ -297,7 +299,7 @@ A secondary metric tracked perplexity on a fixed short passage (512 tokens). Thi
 
 The fixed metric is useful as a sanity check *before* fine-tuning (to verify ASVD compression didn't completely break the model) but loses validity afterward.
 
-**Inference: the LoRA adapters are not needed at deployment.** At test time, inference uses the compressed factored weights (A·B, rank=640) only. The LoRA adapters can be merged or discarded after training. The 1.6× speedup is fully preserved.
+**Inference: the LoRA adapters must stay at deployment.** They hold the recovery; without them the model is back at 153.82 ppl. Two options keep the factored form: run them as a rank-16 side branch, or fold them into the factors (rank 640 → 656). Both cost about 2.5% extra per MLP matmul, so the theoretical MLP speedup is about 1.56×, not 1.60×. Merging them into a dense weight matrix would remove the speedup.
 
 ---
 
@@ -325,7 +327,7 @@ At rank=16, the closed-form correction is **5× worse than LoRA at the same para
 
 **Why it fails:** The cross-layer cascade. Fixing layer 0's correction assumes the inputs to layer 0 are the original ASVD'd activations. But once layer 0 is corrected, the activations it outputs shift — and layer 1's pre-computed correction was calibrated for the uncorrected inputs. Thirty-six layers of individually-correct fixes do not add up: each correction is right only given the wrong inputs. The cascade compounds independently of how good each individual correction is.
 
-**The acceleration idea that doesn't work:** Merging A·B back into the weight matrix produces a dense matrix, destroying the 1.6× speedup. The closed-form correction has no speedup benefit even if quality were acceptable.
+**Speedup note:** Merging A·B into a dense weight matrix destroys the 1.6× speedup. Kept as a rank-16 side branch, or folded into the factors (rank 640 → 656), it costs only about 2.5% extra per MLP matmul. The problem with the closed-form correction is quality (4.54×), not speed.
 
 **What it changed:** Confirmed that end-to-end gradient flow is not optional — it is what allows the 36 corrections to account for each other. But the residual SVD was not useless: it produced exactly the right initialization for Direction F.
 
@@ -365,7 +367,7 @@ The scale factor `√(r/α) = √(16/32) ≈ 0.707` ensures that at t=0, `(α/r)
 
 **Epoch 1 of CF-init (24.64) already beats Experiment 06's final 3-epoch result (24.53).**
 
-Final result: **23.79 ppl — 0.863× baseline, 1.6× inference speedup retained.**
+Final result: **23.79 ppl — 0.863× baseline, theoretical MLP speedup about 1.56× (adapters kept).**
 
 **What the numbers show:**
 
@@ -391,7 +393,7 @@ At epoch 1, CF-init is approximately 2 epochs ahead of zero-init. By epoch 3, th
 
 ### Lesson 1: Scale is the gating factor
 
-The break-even speedup rank is `k < in_dim / 2`. For a 768-dim model, this is 384 — exactly where ASVD starts to fail. For a 1280-dim model, this is 640 — where ASVD gives 2.78× quality degradation, a recoverable gap. The math dictates that **larger models are inherently more compressible** in the low-rank sense: their weight matrices have more absolute rank budget before hitting the break-even point.
+The 1.6× rank for the 4:1 MLP matrices is `min(out, in) / 2`. For a 768-dim model, this is 384 — exactly where ASVD starts to fail. For a 1280-dim model, this is 640 — where ASVD gives 2.78× quality degradation, a recoverable gap. The math dictates that **larger models are inherently more compressible** in the low-rank sense: their weight matrices have more absolute rank budget at the 1.6× rank.
 
 This explains why compression research consistently finds better results on larger models.
 
@@ -447,7 +449,7 @@ The full pipeline that works, confirmed end-to-end on GPT-2 Large:
    s_j = mean|X_j|^0.5  (per input channel)
 
 2. ASVD compression  (~20s, one-time, offline)
-   For each target layer (c_fc, c_proj, attn c_proj):
+   For each MLP layer (c_fc, c_proj); attention stays dense:
      W_scaled = W * s           (scale columns by activation stats)
      U, Σ, Vh = SVD(W_scaled)
      W_approx = (U[:,:k] * Σ[:k]) @ Vh[:k] / s   (de-scale)
@@ -465,17 +467,17 @@ The full pipeline that works, confirmed end-to-end on GPT-2 Large:
    Fine-tune on domain-relevant data (WikiText-2 or target corpus)
    ~1.13% trainable parameters
 
-5. Merge or discard LoRA
-   For inference, use only the compressed factored weights W_approx
-   LoRA adapters can be merged: W_final = W_approx + alpha * lora_B @ lora_A
-   Or discarded if the factored form is kept separate for speed
+5. Keep LoRA (it holds the recovery; do not discard it)
+   Option A: run it as a rank-16 side branch next to the factored weights
+   Option B: fold it into the factors: rank 640 → 656
+   Do not merge into a dense W_final = W_approx + (α/r)·lora_B @ lora_A: that removes the speedup
 
 6. Inference
    Replace nn.Linear layers with factored matmul: y = (x @ B.T) @ A.T
-   Theoretical speedup: 1.6× for rank=640 on 1280-dim matrices
+   Theoretical MLP speedup: about 1.56× (rank 640 + 16 on 5120×1280 matrices)
 ```
 
-**Net result:** A model that runs 1.6× faster at inference time and achieves 0.863× baseline perplexity (13.7% better than the dense model on WikiText-2). Optimization cost: ~1 hour on a T4 GPU (dominated by fine-tuning; SVD steps are negligible). Deployment cost: unchanged hardware, faster matmuls.
+**Net result:** A model with a theoretical MLP speedup of about 1.56× (not yet measured) that achieves 0.863× baseline perplexity (13.7% better than the dense model on WikiText-2). Optimization cost: ~1 hour on a T4 GPU (dominated by fine-tuning; SVD steps are negligible). Deployment cost: unchanged hardware, faster matmuls.
 
 ---
 
@@ -485,8 +487,8 @@ The full pipeline that works, confirmed end-to-end on GPT-2 Large:
 |----------|---------|------------|
 | Binary gate replacing ReLU | Zero speedup | Activation cost is negligible vs matmul cost |
 | Naive SVD on GPT-2 small | 10–60× ppl degradation | Weights are dense; spectrum doesn't decay fast enough |
-| Naive SVD on GPT-2 Large | 34–94× ppl degradation (at break-even rank) | Same; ASVD is the only viable alternative |
-| ASVD on GPT-2 small | Speedup and quality never overlap | Matrix dimension (768) too small for break-even rank to reach quality zone |
+| Naive SVD on GPT-2 Large | 34–94× ppl degradation (at the 1.6× rank) | Same; ASVD is the only viable alternative |
+| ASVD on GPT-2 small | Speedup and quality never overlap | Matrix dimension (768) too small for the 1.6× rank to reach quality zone |
 | Activation-Aware Monarch | Worse than plain Monarch | Activation scaling distorts spectrum at low parameter budgets (< 20% of dense) |
 | Local training (RTX 3060) | SIGTERM from OOM | Firefox + model competing for 12.5 GB VRAM, swap exhausted |
 | Closed-form per-layer correction (Exp 07) | 4.54× baseline at rank=16 (5× worse than LoRA) | Cross-layer cascade: each correction calibrated for uncorrected neighbors; 36 individually-right fixes don't add up without end-to-end gradients |
@@ -496,7 +498,7 @@ The full pipeline that works, confirmed end-to-end on GPT-2 Large:
 ## 7. Directions Not Yet Tested
 
 ### LLaMA-7B / Mistral-7B (Experiment 09, planned)
-The same ASVD + CF-init LoRA pipeline, applied to a model that practitioners actually deploy. Dimension: 4096 (LLaMA-7B MLP hidden), break-even rank: < 2048. 4-bit quantized loading via bitsandbytes fits ~4 GB VRAM. The hypothesis: results should be strictly better than GPT-2 Large because the matrices are 3× larger — more redundancy, more room for compression. LLaMA uses standard `nn.Linear` (not GPT-2's transposed `Conv1D`), so the weight handling is simpler.
+The same ASVD + CF-init LoRA pipeline, applied to a model that practitioners actually deploy. Dimensions: 4096 hidden, 11008 MLP intermediate (LLaMA-7B). Break-even rank: < 2048 for the square attention matrices, < 2985 for the 11008×4096 MLP matrices. 4-bit quantized loading via bitsandbytes fits ~4 GB VRAM. The hypothesis: results should be strictly better than GPT-2 Large because the matrices are 3× larger — more redundancy, more room for compression. LLaMA uses standard `nn.Linear` (not GPT-2's transposed `Conv1D`), so the weight handling is simpler.
 
 ### Actual inference latency benchmark (Experiment 10, planned)
 All speedup numbers so far are *theoretical* (FLOPs reduction). Real PyTorch inference with `nn.Linear` doesn't automatically benefit from factored weights — you need to either replace Linear with a custom module that stores A and B separately, or use a fused CUDA kernel. This experiment would measure actual wall-clock speedup to verify the 1.6× FLOPs advantage translates to practice.
@@ -515,12 +517,12 @@ Experiment 06 used WikiText-2 (2.4M tokens) for 3 epochs. The model converged by
 |-----|-------|--------|-------------|
 | 01 | 128×128 random | SVD + binary gate | Error accumulates to 0.9 over 12 layers; binary gate = ReLU, no speedup |
 | 02 | GPT-2 small | Naive SVD | Weights are dense (rank@90%=39–67%); speedup and quality zones never overlap |
-| 03 | GPT-2 small | ASVD | 8–9× better than naive SVD; still can't close gap at break-even rank; Layer 0 hard blocker |
+| 03 | GPT-2 small | ASVD | 8–9× better than naive SVD; still can't close gap at the 1.6× rank; Layer 0 hard blocker |
 | 04 | GPT-2 small | Monarch + AA-Monarch | Monarch 3× better than SVD at equal budget; AA-Monarch hurts at low budgets; all fail at GPT-2 scale |
 | 05 | GPT-2 Large | ASVD | **First overlap:** rank=640 gives 1.6× speedup at 2.78× ppl; no per-layer blockers; damage is cumulative and recoverable |
-| 06 | GPT-2 Large | ASVD + LoRA (zero-init) | **Complete pipeline:** 0.89× baseline ppl, 1.6× speedup kept; 1.13% trainable params, 55 min on T4 |
+| 06 | GPT-2 Large | ASVD + LoRA (zero-init) | **Complete pipeline:** 0.89× baseline ppl, about 1.56× theoretical MLP speedup (adapters kept); 1.13% trainable params, 55 min on T4 |
 | 07 | GPT-2 Large | ASVD + closed-form correction | **Negative result:** per-layer SVD correction at rank=16 → 4.54× baseline; 5× worse than LoRA; cross-layer cascade requires end-to-end gradients |
-| 08 | GPT-2 Large | ASVD + LoRA (CF-init) | **Best result:** CF-init LoRA → 0.863× baseline ppl (23.79), 1.6× speedup kept; epoch 1 alone beats Exp 06 final; 3% better than zero-init at same training cost |
+| 08 | GPT-2 Large | ASVD + LoRA (CF-init) | **Best result:** CF-init LoRA → 0.863× baseline ppl (23.79), about 1.56× theoretical MLP speedup (adapters kept); epoch 1 alone beats Exp 06 final; 3% better than zero-init at same training cost |
 
 ---
 

@@ -9,11 +9,11 @@
 Same ASVD method as Experiment 03, scaled up:
 - c_fc: 5120×1280 (dense = 6,553,600 params)
 - c_proj: 1280×5120
-- Break-even speedup rank: **< 640** (half of 1280)
+- Break-even speedup rank: **< 1024** (`5120·1280 / (5120+1280)`). Rank 640 is the 1.6× operating point, not break-even.
 - Model loaded in float16 directly to GPU (~2 GB VRAM)
 - Memory-efficient implementation: in-place weight patching, no deepcopy
 
-Baseline perplexity: **16.48**
+Baseline perplexity: **16.48** (one fixed passage, ≤512 tokens). Exp 06–08 evaluate on the WikiText-2 test split (baseline 27.56), so ×baseline ratios do not compare across these experiments.
 
 ## Results
 
@@ -24,7 +24,7 @@ Baseline perplexity: **16.48**
 | 256  | 12.0%   | 4.00×         | 13035 (791×)  | 5516 (335×)   |
 | 384  | 18.0%   | 2.67×         | —             | —             |
 | 512  | 24.0%   | 2.00×         | 2133 (129×)   | 839 (51×)     |
-| 640  | 30.0%   | **1.60×** ← break-even | 1554 (94×) | **45.9 (2.78×)** |
+| 640  | 30.0%   | **1.60×** ← target | 1554 (94×) | **45.9 (2.78×)** |
 | 768  | 36.0%   | 1.33×         | 996 (60×)     | **22.6 (1.37×)** |
 | 1024 | 48.1%   | 1.00×         | 25.2 (1.53×)  | 18.9 (1.14×)  |
 
@@ -46,7 +46,7 @@ The damage at rank=640 all-layers (ppl=45.9) is purely **cumulative** — 36 sma
 - Naive SVD is completely unusable at every rank with meaningful speedup
 
 ### 3. Per-layer behavior completely different from GPT-2 small
-| Model | Layer 0 at break-even rank |
+| Model | Layer 0 at the 1.6× rank (small: 384, Large: 640) |
 |-------|---------------------------|
 | GPT-2 small | ppl → 5× baseline (hard blocker) |
 | GPT-2 Large | ppl → 1.02× baseline (no blocker) |
@@ -73,7 +73,7 @@ For 36 MLP layers (c_fc + c_proj), total MLP speedup ≈ 1.6× → overall model
 
 ## Conclusions
 
-1. **Scale matters.** GPT-2 Large (1280-dim) has enough redundancy that ASVD at break-even rank gives near-usable quality (2.78× baseline). GPT-2 small never achieved this.
+1. **Scale matters.** GPT-2 Large (1280-dim) has enough redundancy that ASVD at the 1.6× rank (640) gives near-usable quality (2.78× baseline). GPT-2 small never achieved this.
 2. **ASVD is essential** — naive SVD is 34× worse at the same budget. Do not use naive SVD on real LLMs.
 3. **No single layer is a hard blocker** at this scale — the non-uniform rank allocation trick needed for GPT-2 small is not required here.
 4. **The degradation is cumulative and recoverable.** LoRA fine-tuning after ASVD rank=640 compression is the natural next step.

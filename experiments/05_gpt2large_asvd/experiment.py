@@ -41,7 +41,10 @@ in_dim  = model.transformer.h[0].mlp.c_fc.weight.shape[0]   # 1600 (stored trans
 out_dim = model.transformer.h[0].mlp.c_fc.weight.shape[1]   # 6400
 print(f"  {N_LAYERS} layers | hidden={in_dim} | c_fc={out_dim}×{in_dim}")
 print(f"  VRAM used: {torch.cuda.memory_allocated()/1e9:.2f} GB")
-print(f"  Break-even speedup rank: < {in_dim // 2}")
+# Break-even (speedup > 1): rank < out·in/(out+in). in_dim//2 is the 1.6× target for 4:1 matrices.
+BREAK_EVEN = out_dim * in_dim // (out_dim + in_dim)
+TARGET_RANK = in_dim // 2
+print(f"  Break-even speedup rank: < {BREAK_EVEN}  |  1.6× target rank: {TARGET_RANK}")
 
 # ── Save original weights to CPU (allows in-place patch + restore) ─────────────
 print("\nCaching original weights on CPU...")
@@ -137,11 +140,11 @@ print(f"\nBaseline perplexity: {baseline_ppl:.2f}")
 print(f"VRAM after setup: {torch.cuda.memory_allocated()/1e9:.2f} GB")
 
 dense_params = out_dim * in_dim
-print(f"\nParameter budget (c_fc {out_dim}×{in_dim}, break-even < {in_dim//2}):")
+print(f"\nParameter budget (c_fc {out_dim}×{in_dim}, break-even < {BREAK_EVEN}):")
 for r in [256, 384, 512, 640, 768, 1024]:
     p = (out_dim + in_dim) * r
     spd = dense_params / p
-    be = " ← break-even" if r == in_dim // 2 else ""
+    be = " ← 1.6× target" if r == TARGET_RANK else ""
     print(f"  rank={r}: {100*p/dense_params:.0f}% of dense, {spd:.2f}× theory speedup{be}")
 
 
@@ -252,8 +255,10 @@ ax1.semilogy(RANKS, naive_ppls, marker="o", color="tomato", linewidth=2, label="
 ax1.semilogy(RANKS, asvd_ppls,  marker="s", color="steelblue", linewidth=2, label="ASVD (α=0.5)")
 ax1.axhline(baseline_ppl, color="green", linestyle="--", linewidth=1.5,
             label=f"Baseline ({baseline_ppl:.1f})")
-ax1.axvline(in_dim // 2, color="gray", linestyle=":", alpha=0.7,
-            label=f"Break-even ({in_dim//2})")
+ax1.axvline(TARGET_RANK, color="gray", linestyle=":", alpha=0.7,
+            label=f"1.6× target ({TARGET_RANK})")
+ax1.axvline(BREAK_EVEN, color="black", linestyle=":", alpha=0.5,
+            label=f"Break-even ({BREAK_EVEN})")
 ax1.set_xlabel(f"SVD rank (all {N_LAYERS} MLP layers)")
 ax1.set_ylabel("Perplexity  [log scale]")
 ax1.set_title("Exp 1: Rank sweep — all MLP layers")
@@ -281,11 +286,11 @@ print("\n" + "=" * 60)
 print("SUMMARY")
 print("=" * 60)
 print(f"GPT-2 Large | {N_LAYERS} layers | {in_dim}-dim | baseline ppl={baseline_ppl:.2f}")
-print(f"Break-even speedup rank: < {in_dim // 2}\n")
+print(f"Break-even speedup rank: < {BREAK_EVEN}  |  1.6× target rank: {TARGET_RANK}\n")
 
 for r, np_, ap in zip(RANKS, naive_ppls, asvd_ppls):
     spd = dense_params / ((out_dim + in_dim) * r)
-    be = " ← break-even" if r == in_dim // 2 else ""
+    be = " ← 1.6× target" if r == TARGET_RANK else ""
     print(f"  rank={r} ({spd:.2f}× theory):  "
           f"naive={np_:.2f} ({np_/baseline_ppl:.2f}×)  "
           f"asvd={ap:.2f} ({ap/baseline_ppl:.2f}×){be}")
@@ -300,6 +305,6 @@ print(f"rank ≥ {naive_good[0][0]}  (ppl={naive_good[0][1]:.2f})" if naive_good
 if asvd_good:
     r_ok = asvd_good[0][0]
     spd_ok = dense_params / ((out_dim + in_dim) * r_ok)
-    be = r_ok < in_dim // 2
+    be = r_ok < BREAK_EVEN
     print(f"\n→ At rank={r_ok}: {spd_ok:.2f}× theory speedup  |  "
-          f"speedup zone: {'YES' if be else 'NO'} (need rank < {in_dim//2})")
+          f"speedup zone: {'YES' if be else 'NO'} (need rank < {BREAK_EVEN})")

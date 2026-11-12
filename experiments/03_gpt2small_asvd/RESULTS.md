@@ -58,12 +58,12 @@ Baseline perplexity: 28.03
 
 - GPT-2 MLP at rank=512: theoretical **1.2× speedup** (barely worth it)
 - GPT-2 MLP at rank=384: theoretical **1.6× speedup** but **2.3× ppl degradation**
-- Break-even for speedup requires rank < 384 — where quality collapses even with ASVD
+- A 1.6× speedup requires rank ≤ 384 — where quality collapses even with ASVD (true break-even, 1.0×, is rank 614 for these 3072×768 matrices)
 
 ## Conclusions
 
 1. **ASVD dramatically outperforms naive SVD** — 8–9× better perplexity at the same rank.
-2. **GPT-2 small is still too small.** The break-even speedup rank (< 384) is exactly where even ASVD fails. Speedup and quality zones still don't overlap.
+2. **GPT-2 small is still too small.** The 1.6× rank (384) is exactly where even ASVD fails. Speedup and quality zones still don't overlap.
 3. **Layer 0 is a hard blocker** at GPT-2 small scale — must be protected or given a much larger rank budget.
 4. **ASVD at rank=512 gives 1.33× baseline ppl** (near-usable) but only 1.2× speedup — not worth the quality cost.
 

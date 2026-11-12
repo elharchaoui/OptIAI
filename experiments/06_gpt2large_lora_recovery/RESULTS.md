@@ -3,16 +3,18 @@
 ## Setup
 
 - **Model:** GPT-2 Large (774M params, 36 layers, 1280-dim hidden)
-- **Compression:** ASVD rank=640 on all MLP c_fc, c_proj, and attn c_proj layers
-  - Theoretical speedup: **1.6×** (break-even rank for 1280-dim matrices)
+- **Compression:** ASVD rank=640 on all 36 MLP `c_fc` and `c_proj` layers (72 matrices). Attention stays dense.
+  - Theoretical MLP speedup: **1.6×** before LoRA, about **1.56×** with the rank-16 adapters kept. (Break-even is rank 1024.)
 - **Recovery:** LoRA rank=16 added on frozen compressed weights
   - Trainable params: 8,847,360 / 782,877,440 = **1.13% of total**
-  - LoRA targets: `c_fc`, `c_proj` (MLP + attention projection)
+  - LoRA targets: `c_fc`, `c_proj`. PEFT matches by name suffix, so `c_proj` also matches the **uncompressed** `attn.c_proj`. Split: 7,372,800 params on the compressed MLP layers, 1,474,560 on `attn.c_proj`.
 - **Dataset:** WikiText-2 (9,343 train chunks × 256 tokens = 2.4M tokens)
 - **Training:** 3 epochs, batch=4, grad_accum=4 (effective batch 16), LR=3e-4
 - **Hardware:** Tesla T4 on Modal ($0.59/hr), 55 min total
 
 ## Results
+
+This experiment evaluates on the full WikiText-2 test split (256-token chunks). Exp 05 used one fixed passage, so its baseline (16.48) and ratios do not compare with the ones here.
 
 | Stage | PPL fixed | ×baseline | PPL wiki | ×baseline |
 |-------|-----------|-----------|----------|-----------|
@@ -22,7 +24,7 @@
 | + LoRA epoch 2 (37 min) | 54.63 | 2.52× | 24.70 | **0.90×** |
 | + LoRA epoch 3 (55 min) | 53.98 | 2.49× | 24.53 | **0.89×** |
 
-**Final: compressed + LoRA surpasses the uncompressed baseline by 11% on WikiText-2, while keeping the full 1.6× inference speedup.**
+**Final: compressed + LoRA surpasses the uncompressed baseline by 11% on WikiText-2, at a theoretical MLP speedup of about 1.56× (adapters kept).**
 
 ## Training Curve (WikiText-2 PPL)
 
@@ -47,7 +49,7 @@ The fixed-text PPL (short 512-token passage) rose from 21.68 (baseline) to ~54 a
 
 2. **Compression + recovery > original.** The fine-tuned compressed model outperforms the dense baseline on WikiText-2. This demonstrates that the LoRA correction can not only recover cumulative ASVD error but also adapt to the evaluation distribution.
 
-3. **The factored structure is preserved.** Inference uses the compressed low-rank weight matrices (rank=640 instead of full-rank 1280). The LoRA adapters add negligible overhead. The 1.6× speedup is kept.
+3. **The factored structure is preserved.** Inference uses the rank-640 factors plus the rank-16 LoRA adapters. The adapters must stay, because they hold the recovery. They add about 2.5% compute per MLP matmul, so the theoretical MLP speedup drops from 1.60× to about 1.56×. The adapters on the dense `attn.c_proj` add about 2.5% to that matmul.
 
 4. **Cumulative error is recoverable.** Experiment 05 showed each layer individually tolerates rank=640 within ±2% — the 2.78× hit came from 36 layers compounding. LoRA gives each layer a trainable correction to absorb its local error, and the sum of 36 small corrections fully repairs the cascade.
 
